@@ -1,0 +1,74 @@
+---
+- hosts: 127.0.0.1
+  tasks:
+  - name: create a vpc 
+    local_action:
+      module: cs_vpc
+      name: yf-ops-services
+      display_text: yf-ops-services
+      cidr: 192.168.0.0/16
+      api_url: http://10.1.34.148:8080/client/api
+      api_key: B3psbn3BNi4AgTPxgNAPPlN3JCeGyTg2w2D3H_7sFMFmehNLnjr07ovPDWaJ2bqWlaG1-HABuFQxPgmsFNgZWw
+      api_secret: jF-r7_hLFRWN8b6beqOBbhPQbRoJXYFCGY-FAn5JbKkxjTme28WSNc0nJRjNkkuiqNm08463UWdghVyy0hwiSw
+      zone: zone-testdc
+      vpc_offering: "Default VPC offering"
+
+  - name: Create a VPC tier yf-ops-web
+    local_action:
+      module: cs_network
+      name: yf-ops-web
+      zone: zone-testdc
+      vpc: yf-ops-services
+      network_offering: DefaultIsolatedNetworkOfferingForVpcNetworks
+      gateway: 192.168.0.1
+      netmask: 255.255.255.0
+      acl: default_allow
+
+  - name: create an instance with multiple interfaces specifying the IP addresses
+    cs_instance:
+      name: files-beiqijia-ctyun-cn
+      display_name: files-beiqijia-ctyun-cn
+      template: Centos_7.5_selinux_on
+      service_offering: cloudstack.cpu-8-ram-16384-disk-0-500-None
+      disk_offering: Large
+      networks: yf-ops-web
+      hypervisor: VMware
+      zone: zone-testdc
+    delegate_to: localhost
+    register: instance
+
+  - name: debug
+    debug: msg={{ instance.state }}
+
+  - name: find file /tmp/publicip 
+    find: paths=/tmp patterns=publicip
+    register: findresult
+
+  - name: debug findresult
+    debug: msg={{ findresult.matched }}
+
+  - name: Associate an IP address 
+    local_action:
+      module: cs_ip_address
+      vpc: yf-ops-services
+      network: yf-ops-web
+    register: ip_address
+    when: instance.state == "Running" and findresult.matched == 0
+  
+  - name: create a test file when public is get
+    file: path=/tmp/publicip state=touch
+    when: ip_address.changed == true
+
+  
+  - name: debug ip addr 
+    debug: msg={{ ip_address }}
+
+  - name: create a static NAT {{ ip_address.ip_address }}-> vm
+    local_action:
+      module: cs_staticnat
+      ip_address: "{{ ip_address.ip_address }}"
+      vm: files-beiqijia-ctyun-cn  
+      vpc: yf-ops-services
+      network: yf-ops-web
+    when: ip_address.changed == true
+
